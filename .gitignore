@@ -1,0 +1,7 @@
+# ignore data folders
+data/
+
+# ignore some data and log files
+*.data
+*.log
+*.out
