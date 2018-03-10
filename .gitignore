@@ -1,7 +1,12 @@
 # ignore data folders
 data/
 
+# ignore requirements
+todo.txt
+
 # ignore some data and log files
 *.data
 *.log
 *.out
+*.csv
+
