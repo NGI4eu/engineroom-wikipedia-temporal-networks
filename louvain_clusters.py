@@ -250,8 +250,8 @@ def main():
 
         logger.info('Compared all clusters')
 
-        clevo_filename = 'clusters_evolution.csv'
-        clevo_path = os.join('data', clevo_filename)
+        clevo_filename = 'clusters_evolution.json'
+        clevo_path = os.path.join('data', clevo_filename)
         with open(clevo_path, 'w') as clevo_out:
             json.dump(compare_clusters, clevo_out)
 
