@@ -13,7 +13,9 @@ optional arguments:
 """
 
 import os
+import re
 import csv
+import json
 import argparse
 import logging
 import igraph as ig
@@ -23,6 +25,11 @@ import arrow
 from typing import Iterable, Iterator, Mapping, NamedTuple, Optional
 import itertools
 import numpy as np
+
+# needs to import optimize explicitly
+# https://github.com/scipy/scipy/issues/4005
+import scipy
+from scipy import optimize
 
 ########## logging
 # create logger with 'spam_application'
@@ -67,13 +74,25 @@ def get_args():
     return args
 
 
-def jaccard_similarity(s1: Iterable[set], 
+# Sanitize filenames
+# https://stackoverflow.com/questions/295135
+def get_valid_filename(s):
+    s = str(s).strip().replace(' ', '_')
+    return re.sub(r'(?u)[^-\w.]', '', s)
+
+
+# Jaccard distance:
+# distance = 1 - (Jaccard similarity)
+#
+# http://dataconomy.com/2015/04/
+#   implementing-the-five-most-popular-similarity-measures-in-python/
+def jaccard_distance(s1: Iterable[set],
                        s2: Iterable[set]) -> float:
     
     intersection_cardinality = len(set.intersection(*[set(s1), set(s2)]))
     union_cardinality = len(set.union(*[set(s1), set(s2)]))
 
-    return intersection_cardinality/float(union_cardinality)    
+    return (1.0 - (intersection_cardinality/float(union_cardinality)))
 
 
 def main():
@@ -136,7 +155,7 @@ def main():
 
     all_clusters = list()
     csv_header = ('date', 'n_partitions')
-    with open('partitions.csv', 'w+') as outfile:
+    with open(os.path.join('data', 'partitions.csv'), 'w+') as outfile:
         writer = csv.writer(outfile, delimiter='\t')
         writer.writerow(csv_header)
 
@@ -216,16 +235,67 @@ def main():
                 nodes_cl1 = set(cl1[1])
                 nodes_cl2 = set(cl2[1])
 
-                sim = jaccard_similarity(nodes_cl1, nodes_cl2)
+                sim = jaccard_distance(nodes_cl1, nodes_cl2)
 
                 clmatrix[ridx][cidx] = sim
 
             logger.info('Compared clusters at {} and {}'.format(t1,t2))
 
-            compare_clusters['{}_{}'.format(t1,t2)] = clmatrix
+            res = scipy.optimize.linear_sum_assignment(clmatrix)
+            cluster_t1_indices = res[0].tolist()
+            cluster_t2_indices = res[1].tolist()
+            c1_to_c2 = dict(zip(cluster_t1_indices,cluster_t2_indices))
+
+            compare_clusters['{}_{}'.format(t1,t2)] = c1_to_c2
 
         logger.info('Compared all clusters')
-        import ipdb; ipdb.set_trace()
+
+        clevo_filename = 'clusters_evolution.csv'
+        clevo_path = os.join('data', clevo_filename)
+        with open(clevo_path, 'w') as clevo_out:
+            json.dump(compare_clusters, clevo_out)
+
+        cl_date_prev = None
+        for date, clusters in all_clusters:
+            cl_date = date.format('YYYY-MM-DD')
+            logger.info('Processing clusters for {}...'.format(cl_date))
+
+            for clid, cl in clusters:
+                logger.info('Processing cluster id {} for {}...'
+                            .format(clid, cl_date))
+
+                cl_dict = None
+                if cl_date_prev is not None:
+                    key = '{}_{}'.format(cl_date_prev, cl_date)
+                    cl_dict = compare_clusters.get(key, None)
+
+                nodes = [v.attributes()['name'] for v in cl.vs]
+
+                for node in nodes:
+                    node_outfilename = get_valid_filename(
+                                        'node_evolution_{}.csv'.format(node))
+                    node_outfilepath = os.path.join('data', 'nodes-evolution',
+                                                    node_outfilename)
+
+                    cl_inv_dict = None
+                    if cl_dict is not None:
+                        cl_inv_dict = {v: k for k, v in cl_dict.items()}
+
+                    newclid = clid
+                    if cl_inv_dict and cl_inv_dict.get(clid, None) is not None:
+                        newclid = cl_inv_dict.get(clid)
+                        import ipdb; ipdb.set_trace()
+
+                    if not os.path.isfile(node_outfilepath):
+                        with open(node_outfilepath, 'a+') as node_outfile:
+                            writer = csv.writer(node_outfile, delimiter='\t')
+                            writer.writerow(('date', 'cluster_id'))
+
+                    with open(node_outfilepath, 'a+') as node_outfile:
+                        writer = csv.writer(node_outfile, delimiter='\t')
+                        writer.writerow((cl_date, newclid))
+
+            cl_date_prev = cl_date
 
 
 if __name__ == '__main__':
