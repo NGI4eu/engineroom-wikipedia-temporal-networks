@@ -25,6 +25,8 @@ import arrow
 from typing import Iterable, Iterator, Mapping, NamedTuple, Optional
 import itertools
 import numpy as np
+import pickle
+from collections import defaultdict
 
 # needs to import optimize explicitly
 # https://github.com/scipy/scipy/issues/4005
@@ -137,13 +139,33 @@ def main():
 
     logger.info('Loaded all graphs')
 
+    logger.info('Preparing to drop empty graphs')
     graphs_copy = copy.deepcopy(graphs)
     for graph_date, G in graphs_copy.items():
         if G.vcount() == 0:
-            logger.info('Dropping empty graph {}'.format(graph_date))
+            logger.debug('Dropping empty graph {}'.format(graph_date))
             del graphs[graph_date]
     del graphs_copy
+    logger.info('Dropped empty graphs')
 
+    global_vset = set()
+    for graph_date, G in graphs.items():
+         vertices = [v.attributes()['name'] for v in G.vs]
+         global_vset.update(vertices)
+
+    logger.info('Building global index of vertices')
+    global_vlist = sorted(global_vset)
+    del global_vset
+    global_vtoid = dict((vname, vid) 
+                        for vid, vname in enumerate(global_vlist))
+    global_idtov = dict((vid, vname) 
+                        for vid, vname in enumerate(global_vlist))
+    with open(os.path.join('data','vertex.json'), 'w+') as vertexfile:
+        json.dump(global_idtov, vertexfile)
+    logger.info('Global index of vertices built')
+
+
+    logger.info('Calculating partitions for all snapshots')
     partitions = dict()
     for graph_date, G in graphs.items():
         logger.debug('Calculating partitions for graph {}...'
@@ -151,7 +173,7 @@ def main():
         part = louvain.find_partition(G, louvain.ModularityVertexPartition);
         partitions[graph_date] = part
 
-    logger.info('Calculated all partitions')
+    logger.info('Calculated partitions for all snapshots')
 
     all_clusters = list()
     csv_header = ('date', 'n_partitions')
@@ -172,89 +194,193 @@ def main():
                                             en_clusters)
                                     )
 
-                for idx, cluster in en_clusters:
-                    nodes = set([v.attributes()['name']
-                                 for v in cluster.vs])
+                clevoname = 'graph.{0}.clusters.csv'.format(graph_date)
+                clevoutfile_path = os.path.join('data', 'partitions-evolution',
+                                                clevoname)
 
-                    clname = ('graph.{0}.cluster.{1:02}.csv'
-                              .format(graph_date, idx))
-                    cloutfile_name = os.path.join('data', 'partitions',
-                                                  clname)
+                with open(clevoutfile_path, 'w+') as clevoutfile:
+                    for idx, cluster in en_clusters:
 
-                    with open(cloutfile_name, 'w+') as cloutfile:
-                        for node in nodes:
-                            cloutfile.write('{}\n'.format(node))
+                        nodes = set([v.attributes()['name']
+                                     for v in cluster.vs])
+
+
+                        nodes_ids = sorted([global_vtoid[n] for n in nodes])
+                        clevoutfile.write(
+                            '{}\n'.format(' '.join(str(nid) 
+                                                   for nid in nodes_ids
+                                                   )
+                                          ))
+
+                        clname = ('graph.{0}.cluster.{1:02}.csv'
+                                  .format(graph_date, idx))
+                        cloutfile_path = os.path.join('data', 'partitions',
+                                                      clname)
+
+                        with open(cloutfile_path, 'w+') as cloutfile:
+                            for node in nodes:
+                                cloutfile.write('{}\n'.format(node))
 
             else:
                 writer.writerow((graph_date, 0))
 
-        logger.info('Written all clusters')
-        # Iterate over all pairs of consecutive items from a given
-        # list
-        # https://stackoverflow.com/q/21303224/2377454
-        cluster_pairs = [pair for pair 
-                         in zip(all_clusters, all_clusters[1:])]
+    logger.info('Written all clusters')
+    # Iterate over all pairs of consecutive items from a given
+    # list
+    # https://stackoverflow.com/q/21303224/2377454
+    cluster_pairs = [pair for pair 
+                     in zip(all_clusters, all_clusters[1:])]
 
-        compare_clusters = dict()
-        for snap_t1, snap_t2 in cluster_pairs:
-            t1 = str(snap_t1.date.format('YYYY-MM-DD'))
-            t2 = str(snap_t2.date.format('YYYY-MM-DD'))
+    logger.info('Compared clusters at t and t+1')
+    compare_clusters = dict()
+    similarity_clusters = dict()
+    for snap_t1, snap_t2 in cluster_pairs:
+        t1 = str(snap_t1.date.format('YYYY-MM-DD'))
+        t2 = str(snap_t2.date.format('YYYY-MM-DD'))
 
-            assert snap_t1.date.replace(months=+1) == snap_t2.date
+        assert snap_t1.date.replace(months=+1) == snap_t2.date
 
-            # snap_t1.clusters and snap_t2.clusters are the clusters at
-            # time t and t+1
+        # snap_t1.clusters and snap_t2.clusters are the clusters at
+        # time t and t+1
 
-            snap_t1_clusters_nodes = list()
-            for idx1, cl1 in snap_t1.clusters:
-                snap_t1_clusters_nodes.append((idx1,
-                                               [v.attributes()['name'] 
-                                               for v in cl1.vs]))
-            del idx1, cl1
+        snap_t1_clusters_nodes = list()
+        for idx1, cl1 in snap_t1.clusters:
+            snap_t1_clusters_nodes.append((idx1,
+                                           [v.attributes()['name'] 
+                                           for v in cl1.vs]))
+        del idx1, cl1
 
-            snap_t2_clusters_nodes = list()
-            for idx2, cl2 in snap_t2.clusters:
-                snap_t2_clusters_nodes.append((idx2,
-                                               [v.attributes()['name'] 
-                                               for v in cl2.vs]))
-            del idx2, cl2
+        snap_t2_clusters_nodes = list()
+        for idx2, cl2 in snap_t2.clusters:
+            snap_t2_clusters_nodes.append((idx2,
+                                           [v.attributes()['name'] 
+                                           for v in cl2.vs]))
+        del idx2, cl2
 
-            cluster_product = itertools.product(snap_t1_clusters_nodes,
-                                                snap_t2_clusters_nodes)
+        cluster_product = itertools.product(snap_t1_clusters_nodes,
+                                            snap_t2_clusters_nodes)
 
-            #  numpy.zeros(shape, dtype=float, order='C')
-            n = len(snap_t1_clusters_nodes)
-            m = len(snap_t2_clusters_nodes)
-            clmatrix = np.zeros((n,m), dtype=float)
-            for cl1, cl2 in cluster_product:
-                ridx = cl1[0]
-                cidx = cl2[0]
-                logger.debug('Comparing clusters at {} and {}: ({},{})'
-                              .format(t1,t2,ridx,cidx))
+        #  numpy.zeros(shape, dtype=float, order='C')
+        n = len(snap_t1_clusters_nodes)
+        m = len(snap_t2_clusters_nodes)
+        clmatrix = np.zeros((n,m), dtype=float)
+        for cl1, cl2 in cluster_product:
+            ridx = cl1[0]
+            cidx = cl2[0]
+            logger.debug('Comparing clusters at {} and {}: ({},{})'
+                          .format(t1,t2,ridx,cidx))
 
-                nodes_cl1 = set(cl1[1])
-                nodes_cl2 = set(cl2[1])
+            nodes_cl1 = set(cl1[1])
+            nodes_cl2 = set(cl2[1])
 
-                sim = jaccard_distance(nodes_cl1, nodes_cl2)
+            sim = jaccard_distance(nodes_cl1, nodes_cl2)
 
-                clmatrix[ridx][cidx] = sim
+            clmatrix[ridx][cidx] = sim
 
-            logger.info('Compared clusters at {} and {}'.format(t1,t2))
+        logger.debug('Compared clusters at {} and {}'.format(t1,t2))
 
-            res = scipy.optimize.linear_sum_assignment(clmatrix)
-            cluster_t1_indices = res[0].tolist()
-            cluster_t2_indices = res[1].tolist()
-            c1_to_c2 = dict(zip(cluster_t1_indices,cluster_t2_indices))
+        res = scipy.optimize.linear_sum_assignment(clmatrix)
+        cluster_t1_indices = res[0].tolist()
+        cluster_t2_indices = res[1].tolist()
+        c1_to_c2 = dict(zip(cluster_t1_indices,cluster_t2_indices))
 
-            compare_clusters['{}_{}'.format(t1,t2)] = c1_to_c2
+        compare_clusters['{}_{}'.format(t1,t2)] = c1_to_c2
 
-        logger.info('Compared all clusters')
+        sim_c1c2 = dict()
+        for c1, c2 in c1_to_c2.items():
+            sim_c1c2[c1] = clmatrix[c1][c2]
+        
+        similarity_clusters['{}_{}'.format(t1,t2)] = sim_c1c2
 
-        clevo_filename = 'clusters_evolution.json'
-        clevo_path = os.path.join('data', clevo_filename)
-        with open(clevo_path, 'w') as clevo_out:
-            json.dump(compare_clusters, clevo_out)
+    logger.info('Compared all clusters')
 
+    clevo_filename = 'clusters_evolution.json'
+    clevo_path = os.path.join('data', clevo_filename)
+    with open(clevo_path, 'w') as clevo_out:
+        json.dump(compare_clusters, clevo_out)
+
+    evolved_clusters = defaultdict(dict)
+    evolved_clusters_stable = defaultdict(dict)
+
+    cl_date_prev = None
+    cluster_no = 0
+    cluster_no_stable = 0
+    for date, clusters in all_clusters:
+        cl_date = date.format('YYYY-MM-DD')
+        logger.info('Processing clusters for {}...'.format(cl_date))
+
+        cl_dict = None
+        if cl_date_prev is not None:
+            key = '{}_{}'.format(cl_date_prev, cl_date)
+            cl_dict = compare_clusters[key]
+            inv_cl_dict = {v: k for k, v in cl_dict.items()}
+
+            for cl in clusters:
+                clid = cl[0]
+                if clid in cl_dict.values():
+                    evolved_clusters[cl_date][clid] = \
+                        evolved_clusters[cl_date_prev][inv_cl_dict[clid]]
+
+                    if similarity_clusters[key][inv_cl_dict[clid]] < 0.34:
+                        evolved_clusters_stable[cl_date][clid] = \
+                            evolved_clusters_stable[cl_date_prev][inv_cl_dict[clid]]
+                    else:
+                        evolved_clusters_stable[cl_date][clid] = cluster_no_stable
+                        cluster_no_stable += 1
+
+                else:
+                    evolved_clusters[cl_date][clid] = cluster_no
+                    evolved_clusters_stable[cl_date][clid] = cluster_no_stable
+                    cluster_no += 1
+                    cluster_no_stable += 1
+        else:
+            for cl in clusters:
+                clid = cl[0]
+                evolved_clusters[cl_date][clid] = cluster_no
+                evolved_clusters_stable[cl_date][clid] = cluster_no_stable
+                cluster_no += 1
+                cluster_no_stable += 1
+
+        cl_date_prev = cl_date
+
+
+    evcl_path = os.path.join('data','evolved_clusters.json')
+    with open(evcl_path, 'w+') as evcl_file:
+        json.dump(evolved_clusters, evcl_file)
+
+    evclstable_path = os.path.join('data','evolved_clusters_stable.json')
+    with open(evclstable_path, 'w+') as evclstable_file:
+        json.dump(evolved_clusters_stable, evclstable_file)    
+
+    cl_date_prev = None
+    for date, clusters in all_clusters:
+        cl_date = date.format('YYYY-MM-DD')
+        logger.info('Processing clusters for {}...'.format(cl_date))
+
+        for clid, cl in clusters:
+            logger.debug('Processing cluster id {} for {}...'
+                         .format(clid, cl_date))
+
+            nodes = [v.attributes()['name'] for v in cl.vs]
+
+            for node in nodes:
+                node_outfilename = get_valid_filename(
+                                    'node_evolution_{}.csv'.format(node))
+                node_outfilepath = os.path.join('data', 'nodes-evolution',
+                                                node_outfilename)
+
+                newclid = evolved_clusters[cl_date][clid]
+
+                if not os.path.isfile(node_outfilepath):
+                    with open(node_outfilepath, 'a+') as node_outfile:
+                        writer = csv.writer(node_outfile, delimiter='\t')
+                        writer.writerow(('date', 'cluster_id'))
+
+                with open(node_outfilepath, 'a+') as node_outfile:
+                    writer = csv.writer(node_outfile, delimiter='\t')
+                    writer.writerow((cl_date, newclid))
+
+        cl_date_prev = cl_date
 
 if __name__ == '__main__':
     main()
