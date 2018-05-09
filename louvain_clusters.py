@@ -305,8 +305,10 @@ def main():
     cl_date_prev = None
     cluster_no = 0
     cluster_no_stable = 0
+    cluster_sizes = dict()
     for date, clusters in all_clusters:
         cl_date = date.format('YYYY-MM-DD')
+        cluster_sizes[cl_date] = defaultdict(int)
         logger.info('Processing clusters for {}...'.format(cl_date))
 
         cl_dict = None
@@ -327,21 +329,44 @@ def main():
                     else:
                         evolved_clusters_stable[cl_date][clid] = cluster_no_stable
                         cluster_no_stable += 1
-
                 else:
                     evolved_clusters[cl_date][clid] = cluster_no
                     evolved_clusters_stable[cl_date][clid] = cluster_no_stable
+
                     cluster_no += 1
                     cluster_no_stable += 1
+
+                cluster_sizes[cl_date][evolved_clusters[cl_date][clid]] = \
+                    cl[1].vcount()
+
+
         else:
             for cl in clusters:
                 clid = cl[0]
                 evolved_clusters[cl_date][clid] = cluster_no
                 evolved_clusters_stable[cl_date][clid] = cluster_no_stable
+
                 cluster_no += 1
                 cluster_no_stable += 1
 
+                cluster_sizes[cl_date][evolved_clusters[cl_date][clid]] = \
+                    cl[1].vcount()
+
         cl_date_prev = cl_date
+
+    for i in range(cluster_no):
+        clsize_path = os.path.join('data',
+                                   'cluster-sizes',
+                                   'cluster_sizes.{:03}.csv'.format(i)) 
+        with open(clsize_path, 'w+') as clsizefile:
+            clsizewriter = csv.writer(clsizefile, delimiter='\t')
+            for graph_date in dates:
+                if graph_date in cluster_sizes:
+                    cl_size = cluster_sizes[graph_date][i]
+                else:
+                    cl_size = 0
+                
+                clsizewriter.writerow((graph_date, cl_size))
 
 
     evcl_path = os.path.join('data','evolved_clusters.json')
@@ -353,6 +378,10 @@ def main():
         json.dump(evolved_clusters_stable, evclstable_file)    
 
     cl_date_prev = None
+
+
+    logger.info('Processing vertexes in clusters')
+    vertex_clusters = defaultdict(dict)
     for date, clusters in all_clusters:
         cl_date = date.format('YYYY-MM-DD')
         logger.info('Processing clusters for {}...'.format(cl_date))
@@ -364,23 +393,28 @@ def main():
             nodes = [v.attributes()['name'] for v in cl.vs]
 
             for node in nodes:
-                node_outfilename = get_valid_filename(
-                                    'node_evolution_{}.csv'.format(node))
-                node_outfilepath = os.path.join('data', 'nodes-evolution',
-                                                node_outfilename)
+                vertex_clusters[node][cl_date] = evolved_clusters[cl_date][clid]
 
-                newclid = evolved_clusters[cl_date][clid]
 
-                if not os.path.isfile(node_outfilepath):
-                    with open(node_outfilepath, 'a+') as node_outfile:
-                        writer = csv.writer(node_outfile, delimiter='\t')
-                        writer.writerow(('date', 'cluster_id'))
+    for node in global_vlist:
+        node_outfilename = get_valid_filename(
+                            'node_evolution_{}.csv'.format(node))
+        node_outfilepath = os.path.join('data', 'nodes-evolution',
+                                        node_outfilename)
 
-                with open(node_outfilepath, 'a+') as node_outfile:
-                    writer = csv.writer(node_outfile, delimiter='\t')
-                    writer.writerow((cl_date, newclid))
+        with open(node_outfilepath, 'w+') as node_outfile:
+            writer = csv.writer(node_outfile, delimiter='\t')
+            writer.writerow(('date', 'cluster_id'))
 
-        cl_date_prev = cl_date
+        for graph_date in dates:
+            clid = vertex_clusters[node].get(graph_date, -1)
+
+            with open(node_outfilepath, 'a+') as node_outfile:
+                writer = csv.writer(node_outfile, delimiter='\t')
+                writer.writerow((graph_date, clid))
+
+    logger.info('All done!')
+
 
 if __name__ == '__main__':
     main()
