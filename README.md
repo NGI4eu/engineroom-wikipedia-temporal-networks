@@ -1,5 +1,5 @@
-engineroom-wikipedia
---------------------
+engineroom-wikipedia-temporal-networks
+---------------------------------------
 
 ## Installation
 
