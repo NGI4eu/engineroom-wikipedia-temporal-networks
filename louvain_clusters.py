@@ -39,7 +39,7 @@ logger = logging.getLogger(__file__)
 logger.setLevel(logging.DEBUG)
 
 # create file handler which logs even debug messages
-fh = logging.FileHandler('louvain_clusters.log')
+fh = logging.FileHandler(__file__.replace('.py','.log'))
 fh.setLevel(logging.DEBUG)
 
 # create console handler with a higher log level
