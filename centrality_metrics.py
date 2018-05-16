@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
+import os
 import re
+import csv
 import igraph
 import logging
 import argparse
@@ -57,8 +59,8 @@ def ranking(vector):
     return ranking
 
 
-def main(network, directed, metrics, betweenness_directed, closeness_mode,
-         coreness_mode, base_node):
+def main(network, output, directed, metrics, betweenness_directed,
+         closeness_mode, coreness_mode, base_node):
 
     # PARAMETERS - DEFAULT VALUES
     #
@@ -110,7 +112,9 @@ def main(network, directed, metrics, betweenness_directed, closeness_mode,
     logger.info('network read. {} nodes and {} edges'.format(g.vcount(), 
                                                              g.ecount()))
 
-    output = 'node'
+    header = []
+    header.append('node')
+    # output = 'node'
     
     if metrics.find('m') >= 0:  
         if directed: 
@@ -124,73 +128,148 @@ def main(network, directed, metrics, betweenness_directed, closeness_mode,
         for i in range(len(clustering)):
             for n in clustering[i]:
                 node_clusters[n] = i+1
-        output += ',' +     'cluster'
+
+        # output += ',' +     'cluster'
+        header.append('cluster')
+
     if metrics.find('d') >= 0:
         if directed:
             indegree = g.indegree()
             indegree_ranking = ranking(indegree)
-            output += ',' +     'indegree' + ',' + 'indegree_rank'
+
+            # output += ',' +     'indegree' + ',' + 'indegree_rank'
+            header.append('indegree')
+            header.append('indegree_rank')
+
             outdegree = g.outdegree()
             outdegree_ranking = ranking(outdegree)
-            output += ',' +     'outdegree' + ',' + 'outdegree_rank'        
+
+            # output += ',' +     'outdegree' + ',' + 'outdegree_ranking'
+            header.append('outdegree')
+            header.append('outdegree_ranking')
+
         else:   
             degree = g.degree()     
             degree_ranking = ranking(degree)
-            output += ',' +     'degree' + ',' + 'degree_rank'
+
+            # output += ',' +     'degree' + ',' + 'degree_rank'
+            header.append('degree')
+            header.append('degree_rank')
+
     if metrics.find('r') >= 0:  
-        output += ',' +     'relevance' + ',' + 'relevance_rank'                    
+        # output += ',' +     'relevance' + ',' + 'relevance_rank'
+        header.append('relevance')
+        header.append('relevance_rank')
+
         if directed:
             pagerank = g.pagerank()
             pagerank_ranking = ranking(pagerank)
-            #~ output += ',' +  'pagerank' + ',' + 'pagerank_rank'  #replaced by more general name "relevance"
+
+            #replaced by more general name "relevance"
+            #~ output += ',' +  'pagerank' + ',' + 'pagerank_rank'
         else:   
             eigenvector = g.eigenvector_centrality()        
             eigenvector_ranking = ranking(eigenvector)
-            #~ output += ',' +  'eigenvector' + ',' + 'eigenvector_rank'    #replaced by more general name "relevance"
+
+            #replaced by more general name "relevance"
+            #~ output += ',' +  'eigenvector' + ',' + 'eigenvector_rank'
+
     if metrics.find('b') >= 0:
         betweenness = g.betweenness(directed=directed and betweenness_directed)     
         betweenness_ranking = ranking(betweenness)  
-        output += ',' +     'betweenness' + ',' + 'betweenness_rank'        
+
+        # output += ',' +     'betweenness' + ',' + 'betweenness_rank'
+        header.append('betweenness')
+        header.append('betweenness_rank')
+
     if metrics.find('c') >= 0:
         closeness = g.closeness(mode=closeness_mode)        
         closeness_ranking = ranking(closeness)
-        output += ',' +     'closeness' + ',' + 'closeness_rank'        
+
+        # output += ',' +     'closeness' + ',' + 'closeness_rank'
+        header.append('closeness')
+        header.append('closeness_rank')
+
     if metrics.find('k') >= 0:
         coreness = g.coreness(mode=coreness_mode)       
         coreness_ranking = ranking(coreness)
-        output += ',' +     'coreness' + ',' + 'coreness_rank'  
-    if metrics.find('l') >= 0:
-        shortest_paths = g.get_shortest_paths(base_node, to=None, weights=None, mode='ALL', output="vpath") 
-        output += ',' +     'distance_from_node' 
 
-    output += '\n'
-    
+        # output += ',' +     'coreness' + ',' + 'coreness_rank'
+        header.append('coreness')
+        header.append('coreness_rank')
+
+    if metrics.find('l') >= 0:
+        shortest_paths = g.get_shortest_paths(base_node, to=None, weights=None,
+                                              mode='ALL', output="vpath")
+
+        # output += ',' +     'distance_from_node'
+        header.append('distance_from_node')
+
+    csvfile = open(output, 'w+')
+    writer = csv.writer(csvfile, delimiter='\t')
+
+    logger.info('Writing results to {}'.format(output))
+
+    writer.writerow(header)
+
     for v in range(g.vcount()):
-        output += '"' + g.vs[v]['name'] + '"'
+        data = []
+
+        # output += '"' + g.vs[v]['name'] + '"'
+        data.append(g.vs[v]['name'])
+
         if 'm' in metrics: 
-            output += ',' + str(node_clusters[v])   
+            # output += ',' + str(node_clusters[v])
+            data.append(node_clusters[v])
+
         if 'd' in metrics: 
+
             if directed:
-                output += ',' + str(indegree[v]) + ',' + str(indegree_ranking[v+1])
-                output += ',' + str(outdegree[v]) + ',' + str(outdegree_ranking[v+1])
+                # output += ',' + str(indegree[v]) + ',' + str(indegree_ranking[v+1])
+                # output += ',' + str(outdegree[v]) + ',' + str(outdegree_ranking[v+1])
+                data.append(indegree[v])
+                data.append(indegree_ranking[v+1])
+                data.append(outdegree[v])
+                data.append(outdegree_ranking[v+1])
+
             else:
-                output += ',' + str(degree[v]) + ',' + str(degree_ranking[v+1])
+                # output += ',' + str(degree[v]) + ',' + str(degree_ranking[v+1])
+                data.append(degree[v])
+                data.append(degree_ranking[v+1])
+
         if 'r' in metrics: 
             if directed:
-                output += ',' + str(pagerank[v]) + ',' + str(pagerank_ranking[v+1])
+                # output += ',' + str(pagerank[v]) + ',' + str(pagerank_ranking[v+1])
+                data.append(pagerank[v])
+                data.append(pagerank_ranking[v+1])
+
             else:
-                output += ',' + str(eigenvector[v]) + ',' + str(eigenvector_ranking[v+1])
+                # output += ',' + str(eigenvector[v]) + ',' + str(eigenvector_ranking[v+1])
+                data.append(eigenvector[v])
+                data.append(eigenvector_ranking[v+1])
+
         if 'b' in metrics: 
-            output += ',' + str(betweenness[v]) + ',' + str(betweenness_ranking[v+1])
+            # output += ',' + str(betweenness[v]) + ',' + str(betweenness_ranking[v+1])
+            data.append(betweenness[v])
+            data.append(betweenness_ranking[v+1])
+
         if 'c' in metrics: 
-            output += ',' + str(closeness[v]) + ',' + str(closeness_ranking[v+1])
+            # output += ',' + str(closeness[v]) + ',' + str(closeness_ranking[v+1])
+            data.append(closeness[v])
+            data.append(closeness_ranking[v+1])
+
         if 'k' in metrics: 
-            output += ',' + str(coreness[v]) + ',' + str(coreness_ranking[v+1])
+            # output += ',' + str(coreness[v]) + ',' + str(coreness_ranking[v+1])
+            data.append(coreness[v])
+            data.append(coreness_ranking[v+1])
+
         if 'l' in metrics: 
-            output += ',' + str(len(shortest_paths[v])-1) 
-        output += '\n'
-            
-    print(output)
+            # output += ',' + str(len(shortest_paths[v])-1)
+            data.append(len(shortest_paths[v])-1)
+
+        writer.writerow(data)
+
+    csvfile.close()
 
 
 def cli_args():
@@ -227,6 +306,9 @@ def cli_args():
     parser.add_argument("--verbose",
                         help="Set verbose output.",
                         action='store_true'
+                        )
+    parser.add_argument("--output",
+                        help="Output filename.",
                         )
     parser.add_argument("--directed",
                         help="The input network is directed.",
@@ -282,7 +364,13 @@ if __name__ == '__main__':
 
     args = cli_args()
 
+    csvfilename = args.output
+    if args.output is None:
+        network_basename = os.path.basename(args.network)
+        csvfilename = '{}.metrics.csv'.format(os.path.splitext(network_basename)[0])
+
     main(args.network,
+         output=csvfilename,
          directed=args.directed,
          metrics=args.metrics,
          betweenness_directed=args.betweenness_directed,
